@@ -205,7 +205,7 @@ def plot_exogenous_forecast(df, forecast_df):
         y=combined_unemp,
         mode='lines',
         name="Unemployment Rate",
-        line=dict(color='yellow')
+        line=dict(color='purple')
     ))
     
     # Add vertical line for forecast start
