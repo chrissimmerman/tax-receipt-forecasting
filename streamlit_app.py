@@ -169,7 +169,7 @@ def plot_exogenous_forecast(df, forecast_df):
         y=combined_gdp,
         mode='lines',
         name="Real GDP",
-        line=dict(color='blue')
+        line=dict(color='red')
     ))
     
     # Add vertical line for forecast start
@@ -205,7 +205,7 @@ def plot_exogenous_forecast(df, forecast_df):
         y=combined_unemp,
         mode='lines',
         name="Unemployment Rate",
-        line=dict(color='green')
+        line=dict(color='yellow')
     ))
     
     # Add vertical line for forecast start
