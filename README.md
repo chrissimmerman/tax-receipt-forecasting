@@ -1,19 +1,98 @@
-# 🎈 Blank app template
 
-A simple Streamlit app template for you to modify!
+# Tax Receipts Forecasting Dashboard
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+## **Overview**
+The **Tax Receipts Forecasting Dashboard** is an interactive tool designed to model and forecast tax revenue under various economic scenarios. Built with **Streamlit**, this dashboard uses **SARIMAX models** with exogenous variables to generate insights into the impact of economic factors like **Corporate Profits (CP)** and **Job Openings (JTSJOL)** on tax receipts.
 
-### How to run it on your own machine
+### Key Features:
+- 📊 **Dynamic Scenario Modeling**: Simulate scenarios such as recessions, booms, policy interventions, and pandemics.
+- 🔮 **Extrapolative Forecasting**: Predict tax receipts and key economic indicators over a user-defined time horizon.
+- 📈 **Customizable Visualizations**: Explore trends in Corporate Profits, Job Openings, and Tax Receipts using intuitive plots.
+- ⚙️ **Machine Learning Models**: Leverage **SARIMAX** and **Unobserved Components Models (UCM)** for accurate predictions.
 
-1. Install the requirements
+---
 
+## **Table of Contents**
+- [Overview](#overview)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Project Structure](#project-structure)
+- [Technical Details](#technical-details)
+- [Future Enhancements](#future-enhancements)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## **Features**
+- **Scenario Analysis**:
+  - Recession: Gradual decline in economic activity.
+  - Boom: Economic growth with increasing profits and job openings.
+  - Policy Intervention: Short-term boosts or slowdowns due to fiscal or monetary policies.
+  - Pandemic: Sharp declines followed by recovery trends.
+
+- **Forecast Customization**:
+  - Adjustable forecast horizons (6-60 months).
+  - Confidence intervals for forecast uncertainty.
+
+- **Data Insights**:
+  - Real-time plotting of historical and forecasted data.
+  - Correlation analysis between exogenous variables and tax receipts.
+
+---
+
+## **Installation**
+### Prerequisites:
+- Python 3.8+
+- Virtual environment (optional but recommended)
+
+### Steps:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/chrissimmerman/tax-receipts-forecast.git
+   cd tax-receipts-forecast
    ```
-   $ pip install -r requirements.txt
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
    ```
 
-2. Run the app
+3. Run the Streamlit app:
+   ```bash
+   streamlit run app.py
+   ```
 
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+---
+
+## **Usage**
+1. Launch the app in your browser by following the instructions in the terminal.
+2. Use the sidebar to:
+   - Select a scenario to model.
+   - Adjust the forecast horizon.
+   - Toggle confidence intervals.
+3. Explore the forecasted trends in tax receipts, Corporate Profits (CP), and Job Openings (JTSJOL).
+
+## **Technical Details**
+### Machine Learning Models:
+- **SARIMAX**:
+  - Predicts tax receipts with exogenous variables (`CP`, `JTSJOL`).
+- **UCM (Unobserved Components Model)**:
+  - Models trends in **Corporate Profits (CP)**.
+
+### Data Sources:
+- **FRED API**:
+  - Corporate Profits (CP)
+  - Job Openings (JTSJOL)
+  - Consumer Price Index (CPIAUCSL)
+- **US Treasury Dept API**:
+  - Monthly Treasury Statement (MTS)
+- Custom transformations for inflation-adjusted data.
+- Linear Interpolation of Corporate Profits (CP)
+---
+
+## **License**
+This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for more details.
+
+---
