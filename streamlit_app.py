@@ -19,13 +19,8 @@ def get_df():
 @st.cache_data(show_spinner="Loading GDP Data...")
 def get_ucm_model(df):
     real_gdp = df['Real GDP Interpolated']
-
-    # Log-transform the Real GDP to stabilize variance and directly model growth rate
-    #log_real_gdp = real_gdp.apply(lambda x: np.log(x))
-
     ucm_model = UnobservedComponents(real_gdp, level='rwdrift')
     ucm_fit = ucm_model.fit()
-
     return ucm_fit
 
 @st.cache_data(show_spinner="Loading Unemployment Data...")
@@ -42,26 +37,30 @@ def get_sarimax_model(df):
         m=12,
         D=1
     )
-
     return SARIMAX_model
 
-def prepare_forecast_data(ucm_fit, arima_unrate_model, periods, gdp_multiplier=1.0, unemp_multiplier=1.0):
-    # Create a DataFrame for future months
-    forecast_df = pd.DataFrame(
-        {
-            "month_index": pd.date_range(df.index[-1], periods=periods, freq="MS").month,
-        },
-        index=pd.date_range(df.index[-1] + pd.DateOffset(months=1), periods=periods, freq="MS"),
-    )
-
-    # Forecast Exogenous Variables
-    gdp_forecast = ucm_fit.get_forecast(steps=periods)
+def prepare_forecast_data(ucm_fit, arima_unrate_model, periods, scenario="Baseline"):
+    # Base forecasts
+    gdp_forecast = ucm_fit.get_forecast(steps=periods).predicted_mean
     unemp_forecast = arima_unrate_model.predict(n_periods=periods)
 
-    # Add the forecasted values to the DataFrame
-    forecast_df["Real GDP Interpolated"] = gdp_forecast.predicted_mean * gdp_multiplier
-    forecast_df["UNRATE_Proportion"] = unemp_forecast * unemp_multiplier
+    # Modify forecasts based on the selected scenario
+    if scenario == "Recession":
+        gdp_forecast *= np.linspace(1.0, 0.85, periods)  # Gradual GDP decline
+        unemp_forecast *= np.linspace(1.0, 1.2, periods)  # Gradual unemployment rise
+    elif scenario == "Boom":
+        gdp_forecast *= np.linspace(1.0, 1.2, periods)  # Gradual GDP growth
+        unemp_forecast *= np.linspace(1.0, 0.85, periods)  # Gradual unemployment decline
+    elif scenario == "Policy Intervention":
+        gdp_forecast[:periods // 2] *= 1.1  # 10% boost for first half
+        unemp_forecast[periods // 2:] *= 0.9  # 10% improvement in second half
 
+    # Return modified forecasts in a DataFrame
+    forecast_df = pd.DataFrame({
+        "Real GDP Interpolated": gdp_forecast,
+        "UNRATE_Proportion": unemp_forecast,
+    }, index=pd.date_range(df.index[-1] + pd.DateOffset(months=1), periods=periods, freq="MS"))
+    
     return forecast_df
 
 def forecast_receipts(SARIMAX_model, forecast_df, periods):
@@ -71,11 +70,9 @@ def forecast_receipts(SARIMAX_model, forecast_df, periods):
         X=forecast_df[["Real GDP Interpolated", "UNRATE_Proportion"]],
         return_conf_int=True,
     )
-
     # Inverse log transformation
     fitted = np.exp(fitted)
     confint = np.exp(confint)
-
     return fitted, confint
 
 def create_plot_data(fitted, confint, periods):
@@ -84,7 +81,7 @@ def create_plot_data(fitted, confint, periods):
     forecast_index = pd.date_range(df.index[-1] + pd.DateOffset(months=1), periods=periods, freq="MS")
 
     # Historical actual receipts
-    historical_actual = np.exp(df["Log Transformed Receipts"])
+    historical_actual = df["Log Transformed Receipts"]
 
     # Forecasted receipts and confidence intervals
     fitted_series = pd.Series(fitted, index=forecast_index, name="Forecasted Receipts")
@@ -100,57 +97,6 @@ def create_plot_data(fitted, confint, periods):
     })
 
     return plot_data
-
-
-def display_forecast_plotly(plot_data, show_confidence_intervals=True):
-    fig = go.Figure()
-
-    # Add actual receipts line
-    fig.add_trace(go.Scatter(
-        x=plot_data.index,  # X-axis remains the same
-        y=plot_data["Actual Receipts"],
-        mode='lines',
-        name='Actual Receipts',
-        line=dict(color='blue'),
-        customdata=plot_data.index,  # Store original datetime values
-        hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Receipts: %{y}<extra></extra>"
-    ))
-
-    # Add forecasted receipts line
-    fig.add_trace(go.Scatter(
-        x=plot_data.index,  # X-axis remains the same
-        y=plot_data["Forecasted Receipts"],
-        mode='lines',
-        name='Forecasted Receipts',
-        line=dict(color='green', dash='solid'),
-        customdata=plot_data.index,  # Store original datetime values
-        hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Forecasted Receipts: %{y}<extra></extra>"
-    ))
-
-    # Add confidence interval as a filled area
-    if show_confidence_intervals:
-        fig.add_trace(go.Scatter(
-            x=list(plot_data.index) + list(plot_data.index[::-1]),  # X-axis remains the same
-            y=list(plot_data["Upper Confidence Interval"]) + list(plot_data["Lower Confidence Interval"][::-1]),
-            fill='toself',
-            fillcolor='rgba(128, 128, 128, 0.3)',
-            line=dict(color='rgba(255,255,255,0)'),
-            hoverinfo="skip",  # Skip hover for the confidence interval
-            name='Confidence Interval'
-        ))
-
-    # Customize layout
-    fig.update_layout(
-        title="Tax Receipts Forecast with Confidence Intervals",
-        xaxis_title="Date",
-        yaxis_title="Receipts",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        template="plotly_white"
-    )
-
-    # Display plot in Streamlit
-    st.plotly_chart(fig, use_container_width=True)
-
 
 def plot_exogenous_forecast(df, forecast_df):
     # Combine historical and forecasted data for Real GDP
@@ -242,11 +188,58 @@ def plot_exogenous_forecast(df, forecast_df):
     with col2:
         st.plotly_chart(unemp_fig, use_container_width=True)
 
+def display_forecast_plotly(plot_data, show_confidence_intervals=True):
+    fig = go.Figure()
 
+    # Add actual receipts line
+    fig.add_trace(go.Scatter(
+        x=plot_data.index,  # X-axis remains the same
+        y=plot_data["Actual Receipts"],
+        mode='lines',
+        name='Actual Receipts',
+        line=dict(color='blue'),
+        customdata=plot_data.index,  # Store original datetime values
+        hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Receipts: %{y}<extra></extra>"
+    ))
 
-def sarimax_forecast(SARIMAX_model, ucm_fit, arima_unrate_model, periods=24, gdp_multiplier=1.0, unemp_multiplier=1.0, show_confidence_intervals=True, start_date=None, end_date=None):
+    # Add forecasted receipts line
+    fig.add_trace(go.Scatter(
+        x=plot_data.index,  # X-axis remains the same
+        y=plot_data["Forecasted Receipts"],
+        mode='lines',
+        name='Forecasted Receipts',
+        line=dict(color='green', dash='solid'),
+        customdata=plot_data.index,  # Store original datetime values
+        hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Forecasted Receipts: %{y}<extra></extra>"
+    ))
+
+    # Add confidence interval as a filled area
+    if show_confidence_intervals:
+        fig.add_trace(go.Scatter(
+            x=list(plot_data.index) + list(plot_data.index[::-1]),  # X-axis remains the same
+            y=list(plot_data["Upper Confidence Interval"]) + list(plot_data["Lower Confidence Interval"][::-1]),
+            fill='toself',
+            fillcolor='rgba(128, 128, 128, 0.3)',
+            line=dict(color='rgba(255,255,255,0)'),
+            hoverinfo="skip",  # Skip hover for the confidence interval
+            name='Confidence Interval'
+        ))
+
+    # Customize layout
+    fig.update_layout(
+        title="Tax Receipts Forecast with Confidence Intervals",
+        xaxis_title="Date",
+        yaxis_title="Receipts",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        template="plotly_white"
+    )
+
+    # Display plot in Streamlit
+    st.plotly_chart(fig, use_container_width=True)
+
+def sarimax_forecast(SARIMAX_model, ucm_fit, arima_unrate_model, periods, gdp_multiplier, unemp_multiplier, show_confidence_intervals, start_date, end_date, scenario="Baseline"):
     # Prepare forecast data
-    forecast_df = prepare_forecast_data(ucm_fit, arima_unrate_model, periods, gdp_multiplier, unemp_multiplier)
+    forecast_df = prepare_forecast_data(ucm_fit, arima_unrate_model, periods, scenario=scenario)
 
     # Forecast receipts
     fitted, confint = forecast_receipts(SARIMAX_model, forecast_df, periods)
@@ -269,9 +262,10 @@ def sarimax_forecast(SARIMAX_model, ucm_fit, arima_unrate_model, periods=24, gdp
     # Display forecast using Streamlit and Plotly
     display_forecast_plotly(combined_data, show_confidence_intervals)
 
-    # Plot exogenous variables forecast
+    # Plot GDP and Unemployment forecasts
     plot_exogenous_forecast(df, forecast_df)
 
+# Main Code
 df = get_df()
 ucm_fit = get_ucm_model(df)
 arima_unrate_model = get_arima_unrate_model(df)
@@ -279,9 +273,13 @@ SARIMAX_model = get_sarimax_model(df)
 
 # Sidebar: User Inputs
 st.sidebar.header("Tax Receipt Forecast Configuration")
-st.sidebar.write("Use the inputs below to customize the forecast.")
+scenario = st.sidebar.selectbox(
+    label="Choose a Scenario Template",
+    options=["Baseline", "Recession", "Boom", "Policy Intervention"],
+    index=0,
+    help="Select an economic scenario to simulate."
+)
 
-# User input for the number of forecast periods
 periods = st.sidebar.number_input(
     label="📅 Forecast Horizon (Months)",
     min_value=1,
@@ -297,93 +295,13 @@ show_confidence_intervals = st.sidebar.checkbox(
     help="Enable or disable confidence intervals in the forecast plot."
 )
 
-# Date range selection
-st.sidebar.subheader("Date Range Selection")
-st.sidebar.write("Choose the range of dates to display on the tax receipts graph.")
-min_date = df.index.min().date()
-max_date = pd.date_range(df.index[-1] + pd.DateOffset(months=1), periods=periods, freq="MS")[-1].date()
-
-start_date = st.sidebar.date_input(
-    label="Start Date", 
-    value=min_date, 
-    min_value=min_date, 
-    max_value=max_date, 
-    help="Set the starting date for the tax receipts graph."
-)
-end_date = st.sidebar.date_input(
-    label="End Date", 
-    value=max_date, 
-    min_value=min_date, 
-    max_value=max_date, 
-    help="Set the ending date for the tax receipts graph."
-)
-
-# Ensure start_date is before end_date
-if start_date > end_date:
-    st.sidebar.error("⚠️ Start Date must be before End Date.")
-
-# GDP Adjustment
-st.sidebar.subheader("Simulate Real GDP Changes")
-st.sidebar.write("Adjust Real GDP to simulate policy or economic changes and observe their effect on tax receipts.")
-gdp_adjustment = st.sidebar.selectbox(
-    label="📈 Real GDP Adjustment (%)",
-    options=["No Change", "10% Increase", "20% Increase", "30% Increase", "10% Decrease", "20% Decrease", "30% Decrease"],
-    index=0,
-    help="Apply a percentage adjustment to Real GDP."
-)
-
-# Unemployment Adjustment
-st.sidebar.subheader("Simulate Unemployment Rate Changes")
-st.sidebar.write("Adjust the unemployment rate to simulate economic scenarios and observe their effect on tax receipts.")
-unemp_adjustment = st.sidebar.selectbox(
-    label="📉 Unemployment Rate Adjustment (%)",
-    options=["No Change", "10% Increase", "20% Increase", "30% Increase", "10% Decrease", "20% Decrease", "30% Decrease"],
-    index=0,
-    help="Apply a percentage adjustment to the unemployment rate."
-)
-
-# Map adjustments to multipliers
-gdp_multiplier_map = {
-    "No Change": 1.0,
-    "10% Increase": 1.1,
-    "20% Increase": 1.2,
-    "30% Increase": 1.3,
-    "10% Decrease": 0.9,
-    "20% Decrease": 0.8,
-    "30% Decrease": 0.7,
-}
-
-unemp_multiplier_map = {
-    "No Change": 1.0,
-    "10% Increase": 1.1,
-    "20% Increase": 1.2,
-    "30% Increase": 1.3,
-    "10% Decrease": 0.9,
-    "20% Decrease": 0.8,
-    "30% Decrease": 0.7,
-}
-
-gdp_multiplier = gdp_multiplier_map[gdp_adjustment]
-unemp_multiplier = unemp_multiplier_map[unemp_adjustment]
-
-# Main Dashboard
 st.title("📊 Tax Receipts Forecast Dashboard")
 st.markdown(
     """
     Welcome to the Tax Receipts Forecast Dashboard! This tool allows you to:
-    - **Adjust Real GDP and unemployment rate** to simulate economic changes.
+    - **Adjust scenarios** to simulate different economic changes.
     - **Explore tax receipt forecasts** over a custom time horizon.
     - **Visualize confidence intervals** for the forecasts.
-    """
-)
-
-st.subheader("Customize Your Forecast")
-st.markdown(
-    """
-    **How It Works:**  
-    - Use the sidebar to modify Real GDP or unemployment rate and set the forecast horizon.  
-    - Changes in these inputs dynamically update the tax receipts forecast.  
-    - Confidence intervals provide a range of likely outcomes based on the model's uncertainty.
     """
 )
 
@@ -392,10 +310,11 @@ if periods:
         SARIMAX_model, 
         ucm_fit, 
         arima_unrate_model, 
-        periods, 
-        gdp_multiplier, 
-        unemp_multiplier, 
-        show_confidence_intervals, 
-        start_date, 
-        end_date
+        periods=periods, 
+        gdp_multiplier=1.0, 
+        unemp_multiplier=1.0, 
+        show_confidence_intervals=show_confidence_intervals, 
+        start_date=None, 
+        end_date=None, 
+        scenario=scenario
     )
