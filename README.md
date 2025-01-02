@@ -87,9 +87,3 @@ The **Tax Receipts Forecasting Dashboard** is an interactive tool designed to mo
   - Monthly Treasury Statement (MTS)
 - Custom transformations for inflation-adjusted data.
 - Linear Interpolation of Corporate Profits (CP)
----
-
-## **License**
-This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for more details.
-
----
