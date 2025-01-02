@@ -8,57 +8,75 @@ import plotly.graph_objects as go
 # Streamlit setup
 st.set_page_config(layout="wide", initial_sidebar_state="expanded")
 
-@st.cache_data(show_spinner="Loading Tax Receipt Data...")
+@st.cache_data(show_spinner="Loading Tax Receipts...")
 def get_df():
-    df = pd.read_csv('final_data.csv')
+    df = pd.read_csv('comp_data.csv')
     # Set Month-Year as index
     df['Month-Year'] = pd.to_datetime(df['Month-Year'])
     df.set_index('Month-Year', inplace=True)
     return df
 
-@st.cache_data(show_spinner="Loading GDP Data...")
+@st.cache_data(show_spinner="Loading Corporate Profits...")
 def get_ucm_model(df):
-    real_gdp = df['Real GDP Interpolated']
-    ucm_model = UnobservedComponents(real_gdp, level='rwdrift')
+    real_cp = df['Real CP Interpolated']
+    ucm_model = UnobservedComponents(real_cp, level='rwdrift')
     ucm_fit = ucm_model.fit()
     return ucm_fit
 
-@st.cache_data(show_spinner="Loading Unemployment Data...")
-def get_arima_unrate_model(df):
-    unemployment_rate = df['UNRATE_Proportion']
-    arima_unrate_model = auto_arima(y=unemployment_rate, seasonal=False)
-    return arima_unrate_model
+@st.cache_data(show_spinner="Loading Job Openings...")
+def get_jtsjol_arima_model(df):
+    jtsjol = df['JTSJOL']
+    arima_jtsjol_model = auto_arima(y=jtsjol, X=df[["Real CP Interpolated"]], seasonal=False)
+    return arima_jtsjol_model
 
 @st.cache_data(show_spinner="Loading Time Series Analysis...")
 def get_sarimax_model(df):
     SARIMAX_model = auto_arima(
         y=df[['Log Transformed Receipts']],
-        X=df[['Real GDP Interpolated', 'UNRATE_Proportion']],
+        X=df[['Real CP Interpolated', 'JTSJOL']],
         m=12,
         D=1
     )
     return SARIMAX_model
 
-def prepare_forecast_data(ucm_fit, arima_unrate_model, periods, scenario="Baseline"):
+def prepare_forecast_data(ucm_fit, arima_jtsjol_model, periods, scenario="Baseline"):
     # Base forecasts
-    gdp_forecast = ucm_fit.get_forecast(steps=periods).predicted_mean
-    unemp_forecast = arima_unrate_model.predict(n_periods=periods)
+    cp_forecast = ucm_fit.get_forecast(steps=periods).predicted_mean
 
     # Modify forecasts based on the selected scenario
     if scenario == "Recession":
-        gdp_forecast *= np.linspace(1.0, 0.85, periods)  # Gradual GDP decline
-        unemp_forecast *= np.linspace(1.0, 1.2, periods)  # Gradual unemployment rise
+        cp_forecast *= np.linspace(1.0, 0.85, periods)
     elif scenario == "Boom":
-        gdp_forecast *= np.linspace(1.0, 1.2, periods)  # Gradual GDP growth
-        unemp_forecast *= np.linspace(1.0, 0.85, periods)  # Gradual unemployment decline
+        cp_forecast *= np.linspace(1.0, 1.2, periods)
     elif scenario == "Policy Intervention":
-        gdp_forecast[:periods // 2] *= 1.1  # 10% boost for first half
-        unemp_forecast[periods // 2:] *= 0.9  # 10% improvement in second half
+        cp_forecast[:periods // 2] *= 1.1
+    elif scenario == "Pandemic":
+        # Sharp drop in the first third, then slow recovery
+        drop_periods = periods // 3
+        recovery_periods = periods - drop_periods
+        cp_forecast[:drop_periods] *= np.linspace(1.0, 0.7, drop_periods)
+        cp_forecast[drop_periods:] *= np.linspace(0.7, 1.0, recovery_periods)
+
+    # Turn cp_forecast into a DataFrame
+    cp_forecast_df = pd.DataFrame(cp_forecast)
+
+    jtsjol_forecast = arima_jtsjol_model.predict(n_periods=periods, X=cp_forecast_df)
+
+    if scenario == "Recession":
+        jtsjol_forecast *= np.linspace(1.0, 0.7, periods)
+    elif scenario == "Boom":
+        jtsjol_forecast *= np.linspace(1.0, 1.3, periods)
+    elif scenario == "Policy Intervention":
+        jtsjol_forecast[periods // 2:] *= 0.9
+    elif scenario == "Pandemic":
+        # Sharp drop in the first third, then slow recovery
+        jtsjol_forecast[:drop_periods] *= np.linspace(1.0, 0.5, drop_periods)
+        jtsjol_forecast[drop_periods:] *= np.linspace(0.5, 1.0, recovery_periods)
 
     # Return modified forecasts in a DataFrame
     forecast_df = pd.DataFrame({
-        "Real GDP Interpolated": gdp_forecast,
-        "UNRATE_Proportion": unemp_forecast,
+        "Real CP Interpolated": cp_forecast,
+        "JTSJOL": jtsjol_forecast,
     }, index=pd.date_range(df.index[-1] + pd.DateOffset(months=1), periods=periods, freq="MS"))
     
     return forecast_df
@@ -67,7 +85,7 @@ def forecast_receipts(SARIMAX_model, forecast_df, periods):
     # Forecast tax receipts using SARIMAX
     fitted, confint = SARIMAX_model.predict(
         n_periods=periods,
-        X=forecast_df[["Real GDP Interpolated", "UNRATE_Proportion"]],
+        X=forecast_df[['Real CP Interpolated', 'JTSJOL']],
         return_conf_int=True,
     )
     # Inverse log transformation
@@ -99,10 +117,10 @@ def create_plot_data(fitted, confint, periods):
     return plot_data
 
 def plot_exogenous_forecast(df, forecast_df):
-    # Combine historical and forecasted data for Real GDP
+    # Combine historical and forecasted data for Real CP
     combined_gdp = pd.concat([
-        df["Real GDP Interpolated"],
-        forecast_df["Real GDP Interpolated"]
+        df["Real CP Interpolated"],
+        forecast_df["Real CP Interpolated"]
     ])
     
     # Convert the forecast start to an ordinal value
@@ -111,16 +129,16 @@ def plot_exogenous_forecast(df, forecast_df):
     # Adjust tick frequency (e.g., show one tick per year)
     tick_frequency = pd.date_range(combined_gdp.index.min(), combined_gdp.index.max(), freq="YS")
 
-    # Create GDP Forecast Plot
+    # Create CP Forecast Plot
     gdp_fig = go.Figure()
     gdp_fig.add_trace(go.Scatter(
         x=combined_gdp.index.map(lambda x: x.toordinal()),  # Convert x-axis to ordinal
         y=combined_gdp,
         mode='lines',
-        name="Real GDP",
+        name="Real CP",
         line=dict(color='red'),
         customdata=combined_gdp.index,  # Store original datetime values
-        hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Real GDP: %{y}<extra></extra>"
+        hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Real CP: %{y}<extra></extra>"
     ))
     
     # Add vertical line for forecast start
@@ -131,7 +149,7 @@ def plot_exogenous_forecast(df, forecast_df):
         annotation_position="top right"
     )
     gdp_fig.update_layout(
-        title="Historical and Forecasted Real GDP",
+        title="Historical and Forecasted Corporate Profits",
         xaxis=dict(
             title=dict(text="Date"),
             type="linear",
@@ -139,26 +157,26 @@ def plot_exogenous_forecast(df, forecast_df):
             tickvals=tick_frequency.map(lambda x: x.toordinal()),  # Add only year-start ticks
             ticktext=tick_frequency.strftime("%Y-%m"),
         ),
-        yaxis=dict(title=dict(text="Real GDP")),
+        yaxis=dict(title=dict(text="Real CP")),
         template="plotly_white"
     )
 
-    # Combine historical and forecasted data for Unemployment Rate
+    # Combine historical and forecasted data for JTSJOL
     combined_unemp = pd.concat([
-        df["UNRATE_Proportion"],
-        forecast_df["UNRATE_Proportion"]
+        df["JTSJOL"],
+        forecast_df["JTSJOL"]
     ])
     
-    # Create Unemployment Rate Forecast Plot
+    # Create JTSJOL Forecast Plot
     unemp_fig = go.Figure()
     unemp_fig.add_trace(go.Scatter(
         x=combined_unemp.index.map(lambda x: x.toordinal()),  # Convert x-axis to ordinal
         y=combined_unemp,
         mode='lines',
-        name="Unemployment Rate",
+        name="JTSJOL",
         line=dict(color='purple'),
         customdata=combined_unemp.index,  # Store original datetime values
-        hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Unemployment Rate: %{y}<extra></extra>"
+        hovertemplate="Date: %{customdata|%Y-%m-%d}<br>Job Openings: %{y}<extra></extra>"
     ))
     
     # Add vertical line for forecast start
@@ -169,7 +187,7 @@ def plot_exogenous_forecast(df, forecast_df):
         annotation_position="top right"
     )
     unemp_fig.update_layout(
-        title="Historical and Forecasted Unemployment Rate",
+        title="Historical and Forecasted Job Openings",
         xaxis=dict(
             title=dict(text="Date"),
             type="linear",
@@ -177,7 +195,7 @@ def plot_exogenous_forecast(df, forecast_df):
             tickvals=tick_frequency.map(lambda x: x.toordinal()),  # Add only year-start ticks
             ticktext=tick_frequency.strftime("%Y-%m"),
         ),
-        yaxis=dict(title=dict(text="Unemployment Rate")),
+        yaxis=dict(title=dict(text="Job Openings")),
         template="plotly_white"
     )
 
@@ -237,9 +255,9 @@ def display_forecast_plotly(plot_data, show_confidence_intervals=True):
     # Display plot in Streamlit
     st.plotly_chart(fig, use_container_width=True)
 
-def sarimax_forecast(SARIMAX_model, ucm_fit, arima_unrate_model, periods, gdp_multiplier, unemp_multiplier, show_confidence_intervals, start_date, end_date, scenario="Baseline"):
+def sarimax_forecast(SARIMAX_model, ucm_fit, arima_jtsjol_model, periods, show_confidence_intervals, start_date=None, end_date=None, scenario="Baseline"):
     # Prepare forecast data
-    forecast_df = prepare_forecast_data(ucm_fit, arima_unrate_model, periods, scenario=scenario)
+    forecast_df = prepare_forecast_data(ucm_fit, arima_jtsjol_model, periods, scenario=scenario)
 
     # Forecast receipts
     fitted, confint = forecast_receipts(SARIMAX_model, forecast_df, periods)
@@ -268,24 +286,24 @@ def sarimax_forecast(SARIMAX_model, ucm_fit, arima_unrate_model, periods, gdp_mu
 # Main Code
 df = get_df()
 ucm_fit = get_ucm_model(df)
-arima_unrate_model = get_arima_unrate_model(df)
+jtsjol_arima_model = get_jtsjol_arima_model(df)
 SARIMAX_model = get_sarimax_model(df)
 
 # Sidebar: User Inputs
 st.sidebar.header("Tax Receipt Forecast Configuration")
 scenario = st.sidebar.selectbox(
     label="Choose a Scenario Template",
-    options=["Baseline", "Recession", "Boom", "Policy Intervention"],
+    options=["Baseline", "Recession", "Boom", "Policy Intervention", "Pandemic"],
     index=0,
     help="Select an economic scenario to simulate."
 )
 
 periods = st.sidebar.number_input(
     label="📅 Forecast Horizon (Months)",
-    min_value=1,
-    max_value=120,
+    min_value=6,
+    max_value=60,
     value=24,
-    step=1,
+    step=6,
     help="Specify how many months into the future you'd like to forecast tax receipts."
 )
 
@@ -294,6 +312,34 @@ show_confidence_intervals = st.sidebar.checkbox(
     value=True,
     help="Enable or disable confidence intervals in the forecast plot."
 )
+
+# Date range selection
+st.sidebar.subheader("Date Range Selection")
+st.sidebar.write("Choose the range of dates to display on the tax receipts graph.")
+min_date = df.index.min().date()
+max_date = pd.date_range(df.index[-1] + pd.DateOffset(months=1), periods=periods, freq="MS")[-1].date()
+
+start_date = st.sidebar.date_input(
+    label="Start Date", 
+    value=min_date, 
+    min_value=min_date, 
+    max_value=max_date, 
+    help="Set the starting date for the tax receipts graph."
+)
+end_date = st.sidebar.date_input(
+    label="End Date", 
+    value=max_date, 
+    min_value=min_date, 
+    max_value=max_date, 
+    help="Set the ending date for the tax receipts graph."
+)
+
+# Ensure start_date is before end_date
+if start_date > end_date:
+    st.sidebar.error("⚠️ Start Date must be before End Date.")
+
+
+
 
 st.title("📊 Tax Receipts Forecast Dashboard")
 st.markdown(
@@ -309,12 +355,10 @@ if periods:
     sarimax_forecast(
         SARIMAX_model, 
         ucm_fit, 
-        arima_unrate_model, 
+        jtsjol_arima_model, 
         periods=periods, 
-        gdp_multiplier=1.0, 
-        unemp_multiplier=1.0, 
         show_confidence_intervals=show_confidence_intervals, 
-        start_date=None, 
-        end_date=None, 
+        start_date=start_date, 
+        end_date=end_date, 
         scenario=scenario
     )
