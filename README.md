@@ -17,10 +17,7 @@ The **Tax Receipts Forecasting Dashboard** is an interactive tool designed to mo
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Project Structure](#project-structure)
 - [Technical Details](#technical-details)
-- [Future Enhancements](#future-enhancements)
-- [Contributing](#contributing)
 - [License](#license)
 
 ---
