@@ -58,7 +58,7 @@ The **Tax Receipts Forecasting Dashboard** is an interactive tool designed to mo
 
 3. Run the Streamlit app:
    ```bash
-   streamlit run app.py
+   streamlit run streamlit_app.py
    ```
 
 ---
