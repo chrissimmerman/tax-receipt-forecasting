@@ -26,7 +26,7 @@ The **Tax Receipts Forecasting Dashboard** is an interactive tool designed to mo
 - **Scenario Analysis**:
   - Recession: Gradual decline in economic activity.
   - Boom: Economic growth with increasing profits and job openings.
-  - Policy Intervention: Short-term boosts or slowdowns due to fiscal or monetary policies.
+  - Policy Intervention: Short-term boost due to fiscal or monetary policies.
   - Pandemic: Sharp declines followed by recovery trends.
 
 - **Forecast Customization**:
@@ -35,7 +35,6 @@ The **Tax Receipts Forecasting Dashboard** is an interactive tool designed to mo
 
 - **Data Insights**:
   - Real-time plotting of historical and forecasted data.
-  - Correlation analysis between exogenous variables and tax receipts.
 
 ---
 
@@ -83,7 +82,7 @@ The **Tax Receipts Forecasting Dashboard** is an interactive tool designed to mo
   - Corporate Profits (CP)
   - Job Openings (JTSJOL)
   - Consumer Price Index (CPIAUCSL)
-- **US Treasury Dept API**:
+- **US Treasury Deptartment API**:
   - Monthly Treasury Statement (MTS)
 - Custom transformations for inflation-adjusted data.
 - Linear Interpolation of Corporate Profits (CP)
